@@ -126,7 +126,8 @@ def create_heatmap(corr_df):
     )
 
     text = base.mark_text().encode(
-        text=alt.Text('Correlation', format=".2f'),
+        # 오류 수정: format=".2f' 대신 format=".2f" 사용
+        text=alt.Text('Correlation', format=".2f"),
         color=alt.value('black') 
     )
 
