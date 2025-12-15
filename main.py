@@ -2,33 +2,41 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+import os
 
-# --- 설정 ---
-FILE_NAME = "titanic_data.csv" 
-st.set_page_config(layout="wide", page_title="타이타닉 데이터 상관관계 분석")
+st.set_page_config(layout="wide", page_title="타이타닉 데이터 상관관계 분석 (XLSX)")
 
 # 분석에 사용할 표준화된 열 이름 정의 (모두 소문자로 통일)
 STANDARD_COLS = ['pclass', 'age', 'sibsp', 'parch', 'fare']
 
+def find_data_file():
+    """현재 디렉토리에서 첫 번째 XLSX 파일을 찾습니다."""
+    for filename in os.listdir('.'):
+        if filename.endswith('.xlsx'):
+            st.info(f"✅ 데이터 파일 '{filename}'을(를) 자동으로 찾았습니다.")
+            return filename
+    return None
+
 @st.cache_data
 def load_and_preprocess_data(file_path):
     """
-    CSV 파일을 로드하고, 열 이름 정규화, 숫자 변환, 결측치 처리를 수행합니다.
+    XLSX 파일을 로드하고, 열 이름 정규화, 숫자 변환, 결측치 처리를 수행합니다.
+    (pd.read_csv 대신 pd.read_excel 사용)
     """
     try:
-        df = pd.read_csv(file_path)
+        # 엑셀 파일 로드 (첫 번째 시트(sheet_name=0) 사용)
+        df = pd.read_excel(file_path, sheet_name=0)
     except FileNotFoundError:
-        st.error(f"❌ 오류: 데이터 파일 '{file_path}'을(를) 찾을 수 없습니다. 파일 이름을 확인하고 같은 폴더에 넣어주세요.")
+        st.error(f"❌ 오류: 데이터 파일 '{file_path}'을(를) 찾을 수 없습니다.")
         return None
     except Exception as e:
-        st.error(f"❌ 오류: 데이터 로드 중 문제가 발생했습니다. ({e})")
+        st.error(f"❌ 오류: Excel 파일 로드 중 문제가 발생했습니다. (오픈파이엑셀 라이브러리가 설치되었는지 확인하세요: {e})")
         return None
     
     # 1. 열 이름 정규화: 소문자로 변환하고 공백 제거 (유연성 확보)
-    original_cols = df.columns
     df.columns = df.columns.str.lower().str.replace(' ', '', regex=False)
     
-    # 2. 'sex' (성별) 열 찾기 및 숫자 변환 (female=1, male=0)
+    # 2. 'sex' (성별) 열 찾기 및 숫자 변환
     sex_col_name = None
     for col in df.columns:
         if 'sex' in col or 'gender' in col:
@@ -36,13 +44,12 @@ def load_and_preprocess_data(file_path):
             break
             
     if sex_col_name:
-        # 'sex_numeric' 열 생성
         df['sex_numeric'] = df[sex_col_name].astype(str).str.lower().map({'female': 1, 'male': 0})
-        df['sex_numeric'].fillna(df['sex_numeric'].median(), inplace=True) # 변환 안 된 값(NaN) 중앙값 처리
+        df['sex_numeric'].fillna(df['sex_numeric'].median(), inplace=True)
     else:
         st.warning("⚠️ 경고: 'sex' 또는 'gender' 열을 찾을 수 없어 성별 분석은 제외됩니다.")
 
-    # 3. 분석 대상 숫자형 열 정의
+    # 3. 분석 대상 숫자형 열 정의 및 처리
     numeric_analysis_cols = [col for col in STANDARD_COLS if col in df.columns]
     if 'sex_numeric' in df.columns:
         numeric_analysis_cols.append('sex_numeric')
@@ -51,23 +58,21 @@ def load_and_preprocess_data(file_path):
         st.error("❌ 오류: 분석에 사용할 유효한 숫자형 데이터 열 (pclass, age, fare 등)을 찾을 수 없습니다.")
         return None
             
-    # 4. 숫자 변환 및 결측치 처리 (NaN -> 중앙값)
     processed_df = df[numeric_analysis_cols].copy()
     
     for col in processed_df.columns:
-        # 숫자로 강제 변환 (문자열 등은 NaN으로)
         processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce')
-        
-        # 결측치(NaN)를 중앙값으로 대체
         median_val = processed_df[col].median()
         if not pd.isna(median_val):
             processed_df[col].fillna(median_val, inplace=True)
         else:
-            # 중앙값이 NaN이면 (즉, 모든 값이 NaN이면) 해당 열 삭제
             processed_df.drop(columns=[col], inplace=True)
             st.warning(f"⚠️ 경고: '{col}' 열의 모든 값이 비어 있거나 숫자가 아니어서 분석에서 제외됩니다.")
 
     return processed_df
+
+# --- 나머지 함수들 (calculate_correlation, get_extreme_correlations, create_scatterplot, create_heatmap) ---
+# [NOTE: 코드가 너무 길어지므로 함수 정의부는 생략하고 본문만 제공합니다. 이전 답변의 함수 정의를 그대로 사용하세요. 문법 오류는 수정되어 있습니다.]
 
 def calculate_correlation(df):
     """데이터프레임의 상관관계 행렬을 계산합니다."""
@@ -78,14 +83,11 @@ def get_extreme_correlations(corr_matrix, is_positive=True):
     
     corr_unstacked = corr_matrix.unstack()
     
-    # 자기 자신과의 상관관계 (1.0) 및 중복 쌍 제거
     pairs = corr_unstacked[corr_unstacked.index.get_level_values(0) != corr_unstacked.index.get_level_values(1)]
     
     if is_positive:
-        # 양수 중 가장 큰 값 (1에 가까운 값)
         result = pairs[pairs > 0].nlargest(1)
     else:
-        # 음수 중 가장 작은 값 ( -1에 가까운 값)
         result = pairs[pairs < 0].nsmallest(1)
     
     if result.empty:
@@ -126,7 +128,6 @@ def create_heatmap(corr_df):
     )
 
     text = base.mark_text().encode(
-        # 오류 수정: format=".2f' 대신 format=".2f" 사용
         text=alt.Text('Correlation', format=".2f"),
         color=alt.value('black') 
     )
@@ -136,10 +137,18 @@ def create_heatmap(corr_df):
 
 # --- Streamlit 앱 본문 ---
 st.title("🚢 타이타닉호 데이터 속성 간 상관관계 분석")
-st.markdown(f"**{FILE_NAME}** 파일을 사용하여 숫자형 속성 간의 관계를 분석하고 시각화합니다.")
+
+# 0. 데이터 파일 찾기
+data_file_name = find_data_file()
+
+if data_file_name is None:
+    st.error("🚨 치명적 오류: 현재 폴더에서 `.xlsx` 파일을 찾을 수 없습니다. 데이터 파일을 `app.py`와 같은 폴더에 넣어주세요.")
+    st.stop()
+
+st.markdown(f"분석 파일: **{data_file_name}**")
 
 # 1. 데이터 로드 및 전처리
-df_numeric = load_and_preprocess_data(FILE_NAME)
+df_numeric = load_and_preprocess_data(data_file_name)
 
 if df_numeric is None or df_numeric.empty:
     st.stop()
